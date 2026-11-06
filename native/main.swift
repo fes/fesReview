@@ -110,8 +110,14 @@ final class MediaService: NSObject, AVAudioRecorderDelegate {
                 guard reader.startReading() else { throw reader.error ?? ReviewError("Cannot index video.") }
                 var times: [CMTime] = []
                 while let sample = samples.copyNextSampleBuffer() {
-                    let time = CMSampleBufferGetPresentationTimeStamp(sample)
-                    if time.isNumeric && time >= .zero { times.append(time) }
+                    for sampleIndex in 0..<CMSampleBufferGetNumSamples(sample) {
+                        var timing = CMSampleTimingInfo()
+                        guard CMSampleBufferGetSampleTimingInfo(sample, at: sampleIndex, timingInfoOut: &timing) == noErr else {
+                            throw ReviewError("Cannot read per-frame video timing.")
+                        }
+                        let time = timing.presentationTimeStamp
+                        if time.isNumeric && time >= .zero { times.append(time) }
+                    }
                 }
                 guard reader.status == .completed else { throw reader.error ?? ReviewError("Video indexing was interrupted.") }
                 times.sort { CMTimeCompare($0, $1) < 0 }

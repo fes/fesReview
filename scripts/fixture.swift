@@ -22,6 +22,7 @@ for (index, value) in [0, 100, 300, 400, 800].enumerated() {
     CVPixelBufferUnlockBaseAddress(pixel!, [])
     precondition(adapter.append(pixel!, withPresentationTime: CMTime(value: Int64(value), timescale: 1000)))
 }
+writer.endSession(atSourceTime: CMTime(value: 900, timescale: 1000))
 input.markAsFinished()
 let done = DispatchSemaphore(value: 0)
 writer.finishWriting { done.signal() }

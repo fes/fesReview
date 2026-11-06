@@ -36,7 +36,8 @@ with tempfile.TemporaryDirectory() as directory:
         return event["png"]
     try:
         send(command="open", path=str(movie))
-        assert receive("opened")["frames"] == 5
+        opened = receive("opened")
+        assert opened["frames"] == 5, opened
         first = frame(0, 0)
         send(command="step", delta=1)
         second = frame(1, .1)

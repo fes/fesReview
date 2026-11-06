@@ -1,0 +1,23 @@
+name: Check and build
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo test --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: scripts/build-macos.sh
+      - run: python3 scripts/smoke-macos.py
+      - run: ditto -c -k --keepParent dist/fesReview.app dist/fesReview-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fesReview-macos
+          path: dist/fesReview-macos.zip

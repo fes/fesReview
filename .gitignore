@@ -1,0 +1,4 @@
+/target/
+/dist/
+*.fesreview/
+.DS_Store

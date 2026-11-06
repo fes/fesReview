@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>fesreview</string>
+<key>CFBundleIdentifier</key><string>com.feslabs.fesReview</string>
+<key>CFBundleName</key><string>fesReview</string>
+<key>CFBundleDisplayName</key><string>fesReview</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>Record your feedback on the selected video frame.</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>Transcribe your recorded feedback on this Mac.</string>
+</dict></plist>

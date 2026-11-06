@@ -20,10 +20,11 @@ The development bundle is ad-hoc signed, not notarized. Open the bundled app rat
 ## Review
 
 - **⌘O** opens an MP4/MOV/M4V file. Choose the parent folder for the review on first use.
-- **Space** plays/pauses; **← / →** moves through actual video presentation timestamps.
-- **Hold R** records; releasing it saves the recording and resumes playback. The record button also toggles recording. The first recording may show a macOS microphone permission dialog: wait for the red Recording indicator before speaking.
+- **Space** plays/pauses. **← / →** step one frame (actual video presentation timestamps); **⇧← / ⇧→** (or **⌃**) jump one second. The transport also has -1s, -1f, +1f, +1s buttons.
+- **R** (or **● Dictate**) pauses and starts dictating a note; press it again to stop. Playback stays paused; press Space to continue. The first recording may show a macOS microphone permission dialog: wait for the red Recording indicator before speaking.
+- **S** (or **Screenshot**) saves the full-resolution current frame. While dictating it attaches to that note; otherwise it attaches to a note already on this frame, or creates a screenshot-only note you can type into.
 - Click a note's timestamp to return to its frame. Edit its transcript directly; **↻** retries failed/interrupted transcription from the retained WAV.
-- The **⋯** menu controls screenshots and automatic resume, and reveals the review folder.
+- The **⋯** menu lists the shortcuts and reveals the review folder.
 
 Notes autosave to `video.ext.fesreview/review.json`, alongside `audio/*.wav` and optional full-resolution `frames/*.png`. Share the complete review folder with the animation workflow. The video itself is not copied. Reopening the same video with its review folder restores the notes; when the folder is elsewhere, choose that same parent again.
 

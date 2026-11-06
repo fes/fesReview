@@ -48,6 +48,14 @@ with tempfile.TemporaryDirectory() as directory:
         assert frame(1, .1) == second
         send(command="seek", seconds=.35)
         frame(2, .3)
+        send(command="jump", seconds=.5)
+        frame(4, .8)
+        send(command="jump", seconds=-.5)
+        frame(2, .3)
+        shot = pathlib.Path(directory) / "shot.png"
+        send(command="screenshot", id="note", frame_index=2, path=str(shot))
+        assert receive("screenshot")["id"] == "note"
+        assert shot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
         send(command="frame", frame_index=9999)
         frame(4, .8)
         send(command="frame", frame_index=0)

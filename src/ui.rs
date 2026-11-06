@@ -21,13 +21,11 @@ pub struct ReviewApp {
     ready: bool,
     loading: bool,
     show_notes: bool,
-    snapshots: bool,
-    resume: bool,
+    text_focus: bool,
     active: Option<Uuid>,
     starting: bool,
     stop_requested: bool,
     stopping: bool,
-    held_record: bool,
     error: Option<String>,
     dirty: bool,
     last_save: Instant,
@@ -61,13 +59,11 @@ impl ReviewApp {
             ready: false,
             loading: false,
             show_notes: false,
-            snapshots: true,
-            resume: true,
+            text_focus: false,
             active: None,
             starting: false,
             stop_requested: false,
             stopping: false,
-            held_record: false,
             error,
             dirty: false,
             last_save: Instant::now(),
@@ -165,13 +161,12 @@ impl ReviewApp {
         match s.begin_note(self.anchor) {
             Ok(id) => {
                 let audio = s.directory.join(format!("audio/{id}.wav"));
-                let screenshot = s.directory.join(format!("frames/{id}.png"));
                 self.active = Some(id);
                 self.starting = true;
                 self.stop_requested = false;
                 self.playing = false;
                 self.show_notes = true;
-                self.send(json!({"command":"record","id":id,"frame_index":self.anchor.frame_index,"audio":audio,"screenshot":if self.snapshots {Some(screenshot)} else {None}}));
+                self.send(json!({"command":"record","id":id,"frame_index":self.anchor.frame_index,"audio":audio}));
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -251,20 +246,13 @@ impl ReviewApp {
                     }
                     self.playing = playing;
                 }
-                Event::Recording {
-                    id,
-                    anchor,
-                    screenshot,
-                } => {
+                Event::Recording { id, anchor } => {
                     if self.active == Some(id) {
                         self.starting = false;
                     }
                     if let Some(note) = self.session.as_mut().and_then(|s| s.note_mut(id)) {
                         note.anchor = anchor;
                         note.timestamp_seconds = anchor.seconds();
-                        if screenshot {
-                            note.screenshot = Some(format!("frames/{id}.png"));
-                        }
                     }
                     self.dirty = true;
                     self.save();
@@ -283,9 +271,20 @@ impl ReviewApp {
                     }
                     self.dirty = true;
                     self.save();
-                    if self.resume && !self.closing && !self.dirty {
-                        self.send(json!({"command":"play"}));
+                }
+                Event::LiveTranscript { id, text } => {
+                    if let Some(note) = self.session.as_mut().and_then(|s| s.note_mut(id)) {
+                        if !note.edited && note.state == NoteState::Recording {
+                            note.transcript = text;
+                        }
                     }
+                }
+                Event::Screenshot { id } => {
+                    if let Some(note) = self.session.as_mut().and_then(|s| s.note_mut(id)) {
+                        note.screenshot = Some(format!("frames/{id}.png"));
+                    }
+                    self.dirty = true;
+                    self.save();
                 }
                 Event::Transcript { id, text } => {
                     if let Some(note) = self.session.as_mut().and_then(|s| s.note_mut(id)) {
@@ -309,7 +308,15 @@ impl ReviewApp {
                     message,
                 } => {
                     self.poll_pending = false;
-                    if let Some(id) = id {
+                    if let (Some(id), "screenshot") = (id, operation.as_str()) {
+                        if let Some(s) = self.session.as_mut() {
+                            s.review.notes.retain(|n| {
+                                n.id != id || !n.audio.is_empty() || n.screenshot.is_some()
+                            });
+                        }
+                        self.dirty = true;
+                        self.save();
+                    } else if let Some(id) = id {
                         if let Some(note) = self.session.as_mut().and_then(|s| s.note_mut(id)) {
                             note.state = NoteState::Failed;
                             note.error = Some(message.clone());
@@ -340,6 +347,53 @@ impl ReviewApp {
             self.playing = !self.playing;
         }
     }
+    fn jump(&mut self, seconds: f64) {
+        if self.ready && self.active.is_none() {
+            self.send(json!({"command":"jump","seconds":seconds}));
+            self.playing = false;
+        }
+    }
+    fn toggle_note(&mut self) {
+        if self.active.is_some() {
+            self.stop_note();
+        } else {
+            self.send(json!({"command":"pause"}));
+            self.playing = false;
+            self.start_note();
+        }
+    }
+    // Attach to the note being dictated, else to a note already on this frame, else start a screenshot-only note.
+    fn screenshot(&mut self) {
+        if !self.ready || self.loading || self.stopping || self.anchor.timescale <= 0 {
+            return;
+        }
+        let frame = self.anchor.frame_index;
+        let anchor = self.anchor;
+        let Some(s) = self.session.as_mut() else {
+            return;
+        };
+        let existing = self.active.or_else(|| {
+            s.review
+                .notes
+                .iter()
+                .rev()
+                .find(|n| n.anchor.frame_index == frame && n.screenshot.is_none())
+                .map(|n| n.id)
+        });
+        let id = match existing {
+            Some(id) => id,
+            None => match s.begin_screenshot_note(anchor) {
+                Ok(id) => id,
+                Err(e) => {
+                    self.error = Some(e.to_string());
+                    return;
+                }
+            },
+        };
+        let path = s.directory.join(format!("frames/{id}.png"));
+        self.show_notes = true;
+        self.send(json!({"command":"screenshot","id":id,"frame_index":frame,"path":path}));
+    }
     fn step(&mut self, delta: i64) {
         if self.ready && self.active.is_none() {
             self.send(json!({"command":"step","delta":delta}));
@@ -361,25 +415,48 @@ impl eframe::App for ReviewApp {
         if self.closing && self.active.is_none() && !self.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if !ctx.wants_keyboard_input() {
-            if ctx.input(|i| i.key_pressed(Key::Space)) {
+        // Only a note editor should keep keyboard focus; otherwise a clicked button or slider
+        // swallows Space/arrows.
+        if !self.text_focus {
+            if let Some(id) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            }
+            let (space, left, right, r, s, jump) = ctx.input(|i| {
+                (
+                    i.key_pressed(Key::Space),
+                    i.key_pressed(Key::ArrowLeft),
+                    i.key_pressed(Key::ArrowRight),
+                    i.key_pressed(Key::R),
+                    i.key_pressed(Key::S) && !i.modifiers.command,
+                    i.modifiers.shift || i.modifiers.ctrl,
+                )
+            });
+            // Hide the keys from egui's focus navigation and from the slider.
+            ctx.input_mut(|i| {
+                i.events.retain(|e| {
+                    !matches!(e, egui::Event::Key { key, .. } if matches!(key, Key::Space | Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown | Key::R | Key::S))
+                })
+            });
+            if space {
                 self.toggle_play();
             }
-            if ctx.input(|i| i.key_pressed(Key::ArrowLeft)) {
-                self.step(-1);
+            for (pressed, dir) in [(left, -1), (right, 1)] {
+                if pressed {
+                    if jump {
+                        self.jump(dir as f64);
+                    } else {
+                        self.step(dir);
+                    }
+                }
             }
-            if ctx.input(|i| i.key_pressed(Key::ArrowRight)) {
-                self.step(1);
+            if r {
+                self.toggle_note();
             }
-            if ctx.input(|i| i.key_pressed(Key::R)) && self.active.is_none() {
-                self.held_record = true;
-                self.start_note();
+            if s {
+                self.screenshot();
             }
         }
-        if self.held_record && ctx.input(|i| i.key_released(Key::R) || !i.focused) {
-            self.held_record = false;
-            self.stop_note();
-        }
+        self.text_focus = false;
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::O)) {
             self.open(ctx);
         }
@@ -392,9 +469,8 @@ impl eframe::App for ReviewApp {
                 if self.loading{ui.spinner();}
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                     ui.menu_button("⋯",|ui|{
-                        ui.checkbox(&mut self.snapshots,"Capture frame with note");ui.checkbox(&mut self.resume,"Resume after recording");
                         if ui.button("Show review folder").clicked(){if let Some(s)=&self.session{let _=std::process::Command::new("open").arg(&s.directory).spawn();}}
-                        ui.separator();ui.weak("Space: play / pause\n← →: previous / next frame\nHold R: record a note");
+                        ui.separator();ui.weak("Space: play / pause\n← →: previous / next frame\n⇧← ⇧→ (or ⌃): back / forward 1 s\nR: start / stop dictation\nS: screenshot of this frame");
                     });
                     ui.toggle_value(&mut self.show_notes,"☰").on_hover_text("Notes");
                 });
@@ -416,7 +492,18 @@ impl eframe::App for ReviewApp {
         egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(self.ready && self.active.is_none(), |ui| {
-                    if ui.button("⏮").on_hover_text("Previous frame · ←").clicked() {
+                    if ui
+                        .button("-1s")
+                        .on_hover_text("Back 1 second · ⇧←")
+                        .clicked()
+                    {
+                        self.jump(-1.0);
+                    }
+                    if ui
+                        .button("-1f")
+                        .on_hover_text("Previous frame · ←")
+                        .clicked()
+                    {
                         self.step(-1);
                     }
                     if ui
@@ -426,14 +513,21 @@ impl eframe::App for ReviewApp {
                     {
                         self.toggle_play();
                     }
-                    if ui.button("⏭").on_hover_text("Next frame · →").clicked() {
+                    if ui.button("+1f").on_hover_text("Next frame · →").clicked() {
                         self.step(1);
+                    }
+                    if ui
+                        .button("+1s")
+                        .on_hover_text("Forward 1 second · ⇧→")
+                        .clicked()
+                    {
+                        self.jump(1.0);
                     }
                 });
                 ui.monospace(timecode(self.anchor.seconds()));
                 ui.add_enabled_ui(self.ready && self.active.is_none(), |ui| {
                     let mut seconds = self.scrub.unwrap_or(self.anchor.seconds());
-                    let width = (ui.available_width() - 160.0).max(80.0);
+                    let width = (ui.available_width() - 360.0).max(80.0);
                     ui.spacing_mut().slider_width = width;
                     let slider = ui.add(
                         egui::Slider::new(&mut seconds, 0.0..=self.duration.max(0.01))
@@ -452,13 +546,13 @@ impl eframe::App for ReviewApp {
                     self.ready && !self.stopping && (!self.dirty || self.active.is_some()),
                     |ui| {
                         let text = if self.active.is_some() {
-                            egui::RichText::new("■").color(Color32::RED)
+                            egui::RichText::new("■ Stop").color(Color32::RED)
                         } else {
-                            egui::RichText::new("●")
+                            egui::RichText::new("● Dictate")
                         };
                         if ui
                             .button(text)
-                            .on_hover_text("Record / stop · Hold R")
+                            .on_hover_text("Start / stop dictation · R")
                             .clicked()
                         {
                             if self.active.is_some() {
@@ -469,6 +563,15 @@ impl eframe::App for ReviewApp {
                         }
                     },
                 );
+                ui.add_enabled_ui(self.ready && !self.loading && !self.stopping, |ui| {
+                    if ui
+                        .button("Screenshot")
+                        .on_hover_text("Save this frame with a note · S")
+                        .clicked()
+                    {
+                        self.screenshot();
+                    }
+                });
                 if self.active.is_some() {
                     if self.starting {
                         ui.spinner();
@@ -509,13 +612,18 @@ impl eframe::App for ReviewApp {
                                     ) {
                                         ui.spinner();
                                     }
-                                    if matches!(
-                                        note.state,
-                                        NoteState::Failed | NoteState::Interrupted
-                                    ) && ui
-                                        .small_button("↻")
-                                        .on_hover_text("Retry transcription")
-                                        .clicked()
+                                    if note.screenshot.is_some() {
+                                        ui.weak("▣").on_hover_text("Screenshot saved");
+                                    }
+                                    if !note.audio.is_empty()
+                                        && matches!(
+                                            note.state,
+                                            NoteState::Failed | NoteState::Interrupted
+                                        )
+                                        && ui
+                                            .small_button("↻")
+                                            .on_hover_text("Retry transcription")
+                                            .clicked()
                                     {
                                         retry = Some((note.id, s.directory.join(&note.audio)));
                                         note.state = NoteState::Transcribing;
@@ -523,15 +631,14 @@ impl eframe::App for ReviewApp {
                                         self.dirty = true;
                                     }
                                 });
-                                if ui
-                                    .add(
-                                        egui::TextEdit::multiline(&mut note.transcript)
-                                            .desired_width(f32::INFINITY)
-                                            .desired_rows(3)
-                                            .hint_text("Note"),
-                                    )
-                                    .changed()
-                                {
+                                let editor = ui.add(
+                                    egui::TextEdit::multiline(&mut note.transcript)
+                                        .desired_width(f32::INFINITY)
+                                        .desired_rows(3)
+                                        .hint_text("Note"),
+                                );
+                                self.text_focus |= editor.has_focus();
+                                if editor.changed() {
                                     note.edited = true;
                                     self.dirty = true;
                                 }

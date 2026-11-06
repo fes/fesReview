@@ -22,7 +22,13 @@ pub enum Event {
     Recording {
         id: uuid::Uuid,
         anchor: FrameTime,
-        screenshot: bool,
+    },
+    LiveTranscript {
+        id: uuid::Uuid,
+        text: String,
+    },
+    Screenshot {
+        id: uuid::Uuid,
     },
     Recorded {
         id: uuid::Uuid,

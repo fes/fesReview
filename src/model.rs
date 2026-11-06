@@ -115,7 +115,7 @@ impl Session {
         }
         review.source = source;
         for note in &mut review.notes {
-            if !safe_relative(&note.audio)
+            if (!note.audio.is_empty() && !safe_relative(&note.audio))
                 || note
                     .screenshot
                     .as_deref()
@@ -152,6 +152,29 @@ impl Session {
             edited: false,
             state: NoteState::Recording,
             audio: format!("audio/{id}.wav"),
+            screenshot: None,
+            error: None,
+        });
+        if let Err(e) = self.save() {
+            self.review.notes.pop();
+            return Err(e);
+        }
+        Ok(id)
+    }
+    /// A note with no dictation: just a frame screenshot the reviewer can annotate by typing.
+    pub fn begin_screenshot_note(&mut self, anchor: FrameTime) -> io::Result<Uuid> {
+        if anchor.timescale <= 0 || anchor.value < 0 {
+            return Err(error("No valid video frame selected."));
+        }
+        let id = Uuid::new_v4();
+        self.review.notes.push(Note {
+            id,
+            anchor,
+            timestamp_seconds: anchor.seconds(),
+            transcript: String::new(),
+            edited: false,
+            state: NoteState::Ready,
+            audio: String::new(),
             screenshot: None,
             error: None,
         });
@@ -233,6 +256,24 @@ mod tests {
         assert_eq!(n.anchor, anchor);
         assert_eq!(n.state, NoteState::Interrupted);
         assert_eq!(n.audio, format!("audio/{id}.wav"));
+    }
+    #[test]
+    fn screenshot_only_note_survives_reopen() {
+        let (_d, v, r) = fixture();
+        let anchor = FrameTime {
+            value: 1,
+            timescale: 24,
+            frame_index: 1,
+        };
+        let mut s = Session::open(&v, r.clone()).unwrap();
+        let id = s.begin_screenshot_note(anchor).unwrap();
+        drop(s);
+        let s = Session::open(&v, r).unwrap();
+        let n = &s.review.notes[0];
+        assert_eq!(
+            (n.id, &n.state, n.audio.as_str()),
+            (id, &NoteState::Ready, "")
+        );
     }
     #[test]
     fn changed_source_does_not_overwrite_review() {

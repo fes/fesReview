@@ -19,6 +19,7 @@ pub struct ReviewApp {
     frames: u64,
     playing: bool,
     ready: bool,
+    loading: bool,
     show_notes: bool,
     snapshots: bool,
     resume: bool,
@@ -58,6 +59,7 @@ impl ReviewApp {
             frames: 0,
             playing: false,
             ready: false,
+            loading: false,
             show_notes: false,
             snapshots: true,
             resume: true,
@@ -96,7 +98,7 @@ impl ReviewApp {
     }
     fn open(&mut self, ctx: &egui::Context) {
         if self.active.is_some()
-            || self.opening.is_some()
+            || self.loading
             || self.backend.is_none()
             || self.session.as_ref().is_some_and(|s| {
                 s.review
@@ -145,6 +147,8 @@ impl ReviewApp {
         }
         let (tx, rx) = mpsc::channel();
         self.opening = Some(rx);
+        self.loading = true;
+        self.ready = false;
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(Session::open(&video, directory).map_err(|e| e.to_string()));
@@ -198,7 +202,11 @@ impl ReviewApp {
                     self.poll_pending = false;
                     self.send(json!({"command":"open","path":path}));
                 }
-                Err(e) => self.error = Some(e),
+                Err(e) => {
+                    self.error = Some(e);
+                    self.loading = false;
+                    self.ready = self.frames > 0;
+                }
             }
         }
         while let Some(event) = self.backend.as_ref().and_then(|b| b.events.try_recv().ok()) {
@@ -207,6 +215,7 @@ impl ReviewApp {
                     self.duration = duration;
                     self.frames = frames;
                     self.ready = true;
+                    self.loading = false;
                 }
                 Event::Frame {
                     anchor,
@@ -313,7 +322,8 @@ impl ReviewApp {
                         self.dirty = true;
                         self.save();
                     }
-                    if operation == "service" {
+                    if operation == "open" || operation == "service" {
+                        self.loading = false;
                         self.ready = false;
                         self.active = None;
                         self.starting = false;
@@ -375,11 +385,11 @@ impl eframe::App for ReviewApp {
         }
         egui::TopBottomPanel::top("menu").show(ctx,|ui|{
             ui.horizontal(|ui|{
-                ui.add_enabled_ui(self.active.is_none() && self.opening.is_none(),|ui|{
+                ui.add_enabled_ui(self.active.is_none() && !self.loading && !self.session.as_ref().is_some_and(|s|s.review.notes.iter().any(|n|n.state==NoteState::Transcribing)),|ui|{
                     if ui.button("＋").on_hover_text("Open video · ⌘O").clicked(){self.open(ctx);}
                 });
                 if let Some(s)=&self.session{ui.weak(s.review.source.path.file_name().unwrap_or_default().to_string_lossy());}
-                if self.opening.is_some() || (self.session.is_some()&&!self.ready && self.error.is_none()){ui.spinner();}
+                if self.loading{ui.spinner();}
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                     ui.menu_button("⋯",|ui|{
                         ui.checkbox(&mut self.snapshots,"Capture frame with note");ui.checkbox(&mut self.resume,"Resume after recording");
@@ -475,6 +485,9 @@ impl eframe::App for ReviewApp {
                 .default_width(290.0)
                 .width_range(220.0..=450.0)
                 .show(ctx, |ui| {
+                    if self.loading {
+                        ui.disable();
+                    }
                     let mut seek = None;
                     let mut retry = None;
                     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -557,7 +570,7 @@ impl eframe::App for ReviewApp {
                 ui.centered_and_justified(|ui| {
                     if ui
                         .add_enabled(
-                            self.backend.is_some() && self.opening.is_none(),
+                            self.backend.is_some() && !self.loading,
                             egui::Button::new("Open video"),
                         )
                         .clicked()

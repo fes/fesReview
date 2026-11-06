@@ -21,7 +21,7 @@ struct ReviewError: LocalizedError {
     init(_ message: String) { self.message = message }
 }
 
-final class MediaService {
+final class MediaService: NSObject, AVAudioRecorderDelegate {
     var player: AVPlayer?
     var asset: AVURLAsset?
     var output: AVPlayerItemVideoOutput?
@@ -93,6 +93,7 @@ final class MediaService {
     func open(_ path: String) {
         guard recordingID == nil, !busy else { return }
         busy = true
+        seekGeneration += 1; pendingTarget = nil
         player?.pause()
         player = nil; output = nil; times = []; lastImage = nil
         let url = URL(fileURLWithPath: path)
@@ -174,6 +175,7 @@ final class MediaService {
                         AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
                         AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
                     ])
+                    recorder.delegate = self
                     guard recorder.prepareToRecord(), recorder.record() else { throw ReviewError("Cannot start the microphone recorder.") }
                     self.recorder = recorder; self.recordingID = id; self.recordingURL = url; self.busy = false
                     self.sendFrame(image)
@@ -185,9 +187,26 @@ final class MediaService {
     func stopRecording() {
         guard let id = recordingID, let url = recordingURL else { return }
         recorder?.stop(); recorder = nil; recordingID = nil; recordingURL = nil
-        // Finalize the WAV before notifying Rust or beginning asynchronous transcription.
+        // Finalize and sync the WAV before notifying Rust or beginning transcription.
+        do {
+            let file = try FileHandle(forWritingTo: url)
+            try file.synchronize()
+            try file.close()
+        } catch { failure("record", "Could not sync recording: \(error.localizedDescription)", id: id); return }
         emit(["event": "recorded", "id": id])
         enqueueTranscription(id: id, url: url)
+    }
+    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        DispatchQueue.main.async { guard self.recorder === recorder else {return}; self.recordingFailed(error?.localizedDescription ?? "Audio recording failed.") }
+    }
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        if !flag { DispatchQueue.main.async { guard self.recorder === recorder else {return}; self.recordingFailed("Audio recording ended unexpectedly; any recorded audio is retained.") } }
+    }
+    func recordingFailed(_ message: String) {
+        guard let id = recordingID else { return }
+        recordingID = nil; recordingURL = nil
+        recorder?.stop(); recorder = nil
+        failure("record", message, id: id)
     }
     func enqueueTranscription(id: String, url: URL) {
         guard !transcriptionQueue.contains(where: { $0.0 == id }) else { return }
@@ -217,7 +236,13 @@ final class MediaService {
         case "poll": poll()
         case "pause": player?.pause(); sendFrame()
         case "play":
-            if recordingID == nil && !busy { player?.play() }
+            if recordingID == nil && !busy, let player {
+                if let asset, player.currentTime().seconds >= asset.duration.seconds - 0.001 {
+                    player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+                        if finished { DispatchQueue.main.async { player.play() } }
+                    }
+                } else { player.play() }
+            }
         case "seek":
             if let seconds = command["seconds"] as? Double, seconds.isFinite { seekFrame(index(at: CMTime(seconds: seconds, preferredTimescale: 600000))) }
         case "frame": if let index = command["frame_index"] as? Int { seekFrame(index) }
@@ -238,7 +263,7 @@ final class MediaService {
 func transcribeModern(_ url: URL, id: String) async throws -> String {
     guard SpeechTranscriber.isAvailable else { throw ReviewError("On-device SpeechTranscriber is unavailable on this Mac. Audio is saved.") }
     guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { throw ReviewError("On-device transcription does not support the current system language. Audio is saved.") }
-    let module = SpeechTranscriber(locale: locale, preset: .offlineTranscription)
+    let module = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
     if let download = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
         await MainActor.run { emit(["event": "transcription_status", "id": id, "message": "Downloading speech model…"]) }
         try await download.downloadAndInstall()

@@ -1,5 +1,8 @@
 name: Check and build
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -11,6 +14,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: xcrun swiftc -swift-version 5 -typecheck native/main.swift
       - run: cargo fmt --check
       - run: cargo test --all-targets
       - run: cargo clippy --all-targets -- -D warnings

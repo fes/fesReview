@@ -2,3 +2,5 @@
 /dist/
 *.fesreview/
 .DS_Store
+
+__pycache__/

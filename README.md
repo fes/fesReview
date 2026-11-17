@@ -20,7 +20,7 @@ The development bundle is ad-hoc signed, not notarized. Open the bundled app rat
 ## Review
 
 - **⌘O** opens an MP4/MOV/M4V file. Choose the parent folder for the review on first use.
-- **Space** plays/pauses. **← / →** step one frame (actual video presentation timestamps); **⇧← / ⇧→** (or **⌃**) jump one second. The transport also has -1s, -1f, +1f, +1s buttons.
+- **Space** plays/pauses. **Home / End** go to the first / last indexed frame. **← / →** step one frame (actual video presentation timestamps); **⇧← / ⇧→** (or **⌃**) jump one second. The transport has matching controls. Navigation pauses playback.
 - **R** (or **● Dictate**) pauses and starts dictating a note; press it again to stop. Playback stays paused; press Space to continue. The first recording may show a macOS microphone permission dialog: wait for the red Recording indicator before speaking.
 - **S** (or **Screenshot**) saves the full-resolution current frame. While dictating it attaches to that note; otherwise it attaches to a note already on this frame, or creates a screenshot-only note you can type into.
 - Click a note's timestamp to return to its frame. Edit its transcript directly; **↻** retries failed/interrupted transcription from the retained WAV.
@@ -40,6 +40,6 @@ cargo fmt --check
 python3 scripts/smoke-macos.py
 ```
 
-Rust tests cover recovery, source-version mismatches, concurrent writers, safe attachment paths, and failed-save preservation. The macOS smoke test creates a variable-frame-rate movie and checks real decoding, distinct frame pixels, next/previous stepping, seeking, and bounds. Microphone permissions, speech model downloads, transcription quality, playback sound, and interactive UI still need a hands-on Mac acceptance pass; see [the checklist](docs/acceptance.md).
+Rust tests cover actions and recording state, recovery, source-version mismatches, concurrent writers, safe attachment paths, and failed-save preservation. The macOS smoke test creates a variable-frame-rate movie and checks real decoding, playback pause, rapid stepping, visible-frame screenshots, seeking, and bounds. Microphone permissions, speech model downloads, transcription quality, playback sound, and interactive UI still need a hands-on Mac acceptance pass; see [the checklist](docs/acceptance.md).
 
 Current limits: indexing reads the complete video before playback; preview frames cross the helper pipe as PNG at up to 30 Hz and 1280 px wide (full-resolution note screenshots are preserved). This favors a straightforward first implementation over high-resolution playback efficiency. Open another video after pending transcriptions finish; closing during transcription retains audio and marks the note recoverable on reopening.

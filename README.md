@@ -30,6 +30,14 @@ Notes autosave to `video.ext.fesreview/review.json`, alongside `audio/*.wav` and
 
 Each note includes a zero-based presentation-order frame index, an exact rational timestamp (`value / timescale`), convenient seconds, transcription state/text, and relative attachment paths. A SHA-256 digest binds the review to that exact source video. Variable-frame-rate footage is indexed rather than assigned an estimated `seconds × fps` frame number.
 
+### Foreground controllers (not shipped)
+
+The macOS app has an optional bridge for fixed Loupedeck CT and Creator Micro 2 review actions. Current builds do not include a controller helper and show **Controller unavailable** in **⋯**. Native device adapters have not been qualified; do not distribute a helper yet.
+
+With a qualified helper bundled as `Contents/MacOS/copilot-controller`, the menu would allow explicitly selecting one controller at a time, initially **Off**. Nothing is saved. The app accepts input only while its review window is focused and ready, and discards queued input on focus loss or review transitions. It launches a fresh child on resume. The helper must not replay startup or buffered hardware events into the new session.
+
+The private child command is `review-input --device ct` or `review-input --device micro`. Stdin is closed; stdout carries only newline-terminated JSON objects with a single `action` field: `toggle_play`, `seek_start`, `seek_end`, `back_one_second`, `forward_one_second`, `screenshot`, `toggle_dictation`, `previous_frame`, or `next_frame`. The app accepts no commands, extra fields, or non-protocol stdout. The bridge uses no listener, global input monitoring, or injection. Tests use a synthetic Rust helper only.
+
 ## Validation
 
 ```sh

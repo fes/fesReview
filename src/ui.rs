@@ -1,4 +1,6 @@
 use crate::backend::{Backend, Event};
+#[cfg(target_os = "macos")]
+use crate::controller::{self, Action as ControllerAction};
 use base64::Engine;
 use eframe::egui::{self, Color32, Key};
 use fesreview::model::{timecode, FrameTime, NoteState, Session};
@@ -34,6 +36,23 @@ enum ReviewAction {
     ToggleDictation,
 }
 
+#[cfg(target_os = "macos")]
+impl From<ControllerAction> for ReviewAction {
+    fn from(action: ControllerAction) -> Self {
+        match action {
+            ControllerAction::TogglePlay => Self::TogglePlay,
+            ControllerAction::SeekStart => Self::Boundary(Direction::Backward),
+            ControllerAction::SeekEnd => Self::Boundary(Direction::Forward),
+            ControllerAction::BackOneSecond => Self::JumpSecond(Direction::Backward),
+            ControllerAction::ForwardOneSecond => Self::JumpSecond(Direction::Forward),
+            ControllerAction::Screenshot => Self::Screenshot,
+            ControllerAction::ToggleDictation => Self::ToggleDictation,
+            ControllerAction::PreviousFrame => Self::StepFrame(Direction::Backward),
+            ControllerAction::NextFrame => Self::StepFrame(Direction::Forward),
+        }
+    }
+}
+
 pub struct ReviewApp {
     backend: Option<Backend>,
     session: Option<Session>,
@@ -58,13 +77,20 @@ pub struct ReviewApp {
     poll_pending: bool,
     closing: bool,
     scrub: Option<f64>,
+    #[cfg(target_os = "macos")]
+    controller: controller::Bridge,
+    #[cfg(target_os = "macos")]
+    controller_focus: Option<controller::Focus>,
     #[cfg(test)]
     commands: Vec<serde_json::Value>,
     #[cfg(test)]
     events: std::collections::VecDeque<Event>,
 }
 impl ReviewApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        #[cfg(target_os = "macos")] shutdown: controller::ShutdownSender,
+    ) -> Self {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = Color32::from_rgb(0x0e, 0x13, 0x19);
         visuals.extreme_bg_color = Color32::from_rgb(0x11, 0x16, 0x1e);
@@ -76,6 +102,10 @@ impl ReviewApp {
             Ok(b) => (Some(b), None),
             Err(e) => (None, Some(e)),
         };
+        #[cfg(target_os = "macos")]
+        let controller = controller::Bridge::new(Some(shutdown));
+        #[cfg(target_os = "macos")]
+        let controller_focus = controller.observe_focus();
         Self {
             backend,
             session: None,
@@ -100,6 +130,10 @@ impl ReviewApp {
             poll_pending: false,
             closing: false,
             scrub: None,
+            #[cfg(target_os = "macos")]
+            controller,
+            #[cfg(target_os = "macos")]
+            controller_focus,
             #[cfg(test)]
             commands: Vec::new(),
             #[cfg(test)]
@@ -144,6 +178,8 @@ impl ReviewApp {
         if self.dirty {
             return;
         }
+        #[cfg(target_os = "macos")]
+        self.controller.suspend();
         self.send(json!({"command":"pause"}));
         self.playing = false;
         let Some(video) = rfd::FileDialog::new()
@@ -449,11 +485,47 @@ impl ReviewApp {
         self.show_notes = true;
         self.send(json!({"command":"screenshot","id":id,"frame_index":frame,"path":path}));
     }
+
+    #[cfg(target_os = "macos")]
+    fn controller_input(&mut self, close: bool, foreground: impl Fn(&Self) -> Option<u64>) {
+        let epoch = if self.controller_ready(close) {
+            foreground(self)
+        } else {
+            None
+        };
+        if let Some(action) = self.controller.next(epoch) {
+            if foreground(self) == epoch {
+                self.dispatch(action.into());
+                if !self.controller_ready(close) {
+                    self.controller.suspend();
+                }
+            } else {
+                self.controller.suspend();
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn controller_ready(&self, close: bool) -> bool {
+        !close
+            && !self.closing
+            && self.ready
+            && !self.loading
+            && self.opening.is_none()
+            && self.session.is_some()
+            && !self.starting
+            && !self.stopping
+            && !self.text_focus
+            && self.scrub.is_none()
+    }
 }
 impl eframe::App for ReviewApp {
-    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain(ctx);
-        if ctx.input(|i| i.viewport().close_requested()) {
+        let close = ctx.input(|i| i.viewport().close_requested());
+        if close {
+            #[cfg(target_os = "macos")]
+            self.controller.suspend();
             self.save();
             if self.active.is_some() || self.dirty {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -526,6 +598,8 @@ impl eframe::App for ReviewApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                     ui.menu_button("⋯",|ui|{
                         if ui.button("Show review folder").clicked(){if let Some(s)=&self.session{let _=std::process::Command::new("open").arg(&s.directory).spawn();}}
+                        #[cfg(target_os = "macos")]
+                        self.controller.menu(ui);
                         ui.separator();ui.weak("Space: play / pause\nHome / End: first / last frame\n← →: previous / next frame\n⇧← ⇧→ (or ⌃): back / forward 1 s\nR: start / stop dictation\nS: screenshot of this frame");
                     });
                     ui.toggle_value(&mut self.show_notes,"☰").on_hover_text("Notes");
@@ -538,6 +612,12 @@ impl eframe::App for ReviewApp {
                     ui.colored_label(Color32::from_rgb(0xd9, 0x68, 0x68), message);
                     if self.dirty && ui.button("Retry save").clicked() {
                         self.save();
+                    }
+                    #[cfg(target_os = "macos")]
+                    if let Some(message) = self.controller.error() {
+                        egui::TopBottomPanel::top("controller_error").show(ctx, |ui| {
+                            ui.colored_label(Color32::from_rgb(0xd9, 0x68, 0x68), message);
+                        });
                     }
                     if ui.small_button("×").clicked() {
                         self.error = None;
@@ -748,6 +828,12 @@ impl eframe::App for ReviewApp {
         if self.dirty && self.last_save.elapsed() > Duration::from_millis(500) {
             self.save();
         }
+        #[cfg(target_os = "macos")]
+        self.controller_input(close, |app| {
+            ctx.input(|i| i.focused)
+                .then(|| app.controller_focus.as_ref()?.foreground(_frame))
+                .flatten()
+        });
         if self.ready && !self.poll_pending && self.last_poll.elapsed() > Duration::from_millis(33)
         {
             self.send(json!({"command":"poll"}));
@@ -791,6 +877,10 @@ mod tests {
             poll_pending: false,
             closing: false,
             scrub: None,
+            #[cfg(target_os = "macos")]
+            controller: controller::Bridge::new(None),
+            #[cfg(target_os = "macos")]
+            controller_focus: None,
             commands: Vec::new(),
             events: Default::default(),
         }
@@ -899,5 +989,45 @@ mod tests {
             app.session.as_ref().unwrap().review.notes[0].anchor,
             app.anchor
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn controller_dictation_reaches_dispatch_only_in_the_current_safe_window() {
+        let dir = tempfile::tempdir_in(".").unwrap();
+        let video = dir.path().join("video.mov");
+        std::fs::write(&video, b"test video").unwrap();
+        let mut app = app();
+        app.session = Some(Session::open(&video, dir.path().join("review")).unwrap());
+        let queue = || controller::tests::queued(7, Instant::now());
+        app.controller = queue();
+        app.controller_input(false, |_| None);
+        app.controller_input(false, |_| Some(7));
+        app.controller = queue();
+        app.controller_input(false, |_| Some(8));
+        app.controller = queue();
+        app.controller_input(true, |_| Some(7));
+        app.controller = queue();
+        app.loading = true;
+        app.controller_input(false, |_| Some(7));
+        app.loading = false;
+        app.controller_input(false, |_| Some(7));
+        assert!(app.commands.is_empty());
+        app.controller = queue();
+        app.controller_input(false, |_| Some(7));
+        assert_eq!(app.commands[0]["command"], "record");
+        app.controller = queue();
+        app.controller_input(false, |_| Some(7)); // Recording is still starting.
+        assert!(!app.stop_requested);
+        app.events.push_back(Event::Recording {
+            id: app.active.unwrap(),
+            anchor: app.anchor,
+        });
+        app.drain(&egui::Context::default());
+        app.controller_input(false, |_| Some(7)); // Drop the transition's queue.
+        assert_eq!(app.commands.len(), 1);
+        app.controller = queue();
+        app.controller_input(false, |_| Some(7));
+        assert_eq!(app.commands[1]["command"], "stop_record");
     }
 }

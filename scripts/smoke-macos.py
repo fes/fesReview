@@ -7,6 +7,7 @@ import queue
 import subprocess
 import tempfile
 import threading
+import time
 
 root = pathlib.Path(__file__).resolve().parent.parent
 with tempfile.TemporaryDirectory() as directory:
@@ -39,6 +40,30 @@ with tempfile.TemporaryDirectory() as directory:
         opened = receive("opened")
         assert opened["frames"] == 5, opened
         first = frame(0, 0)
+        send(command="play")
+        for _ in range(25):
+            send(command="poll")
+            if receive("frame")["playing"]:
+                break
+            time.sleep(.02)
+        else:
+            raise AssertionError("Playback did not start")
+        send(command="step", delta=1)
+        stepped = receive("frame")
+        assert not stepped["playing"], stepped
+        # Return to the exact first frame before the burst.
+        send(command="frame", frame_index=0)
+        first = frame(0, 0)
+        # Commands sent without waiting must accumulate, even across pending seeks.
+        for _ in range(3):
+            send(command="step", delta=1)
+        while True:
+            event = receive("frame")
+            assert not event["playing"], event
+            if event["anchor"]["frame_index"] == 3:
+                break
+        send(command="frame", frame_index=0)
+        frame(0, 0)
         send(command="step", delta=1)
         second = frame(1, .1)
         assert first != second
@@ -52,15 +77,27 @@ with tempfile.TemporaryDirectory() as directory:
         frame(4, .8)
         send(command="jump", seconds=-.5)
         frame(2, .3)
+        send(command="frame", frame_index=2)
+        displayed = frame(2, .3)
         shot = pathlib.Path(directory) / "shot.png"
+        # A pending step must not change which already displayed frame is captured.
+        send(command="step", delta=1)
         send(command="screenshot", id="note", frame_index=2, path=str(shot))
-        assert receive("screenshot")["id"] == "note"
-        assert shot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        saw_shot = saw_step = False
+        while not (saw_shot and saw_step):
+            event = messages.get(timeout=30)
+            assert event["event"] != "failed", event
+            if event["event"] == "screenshot":
+                assert event["id"] == "note"
+                saw_shot = True
+            elif event["event"] == "frame" and event["anchor"]["frame_index"] == 3:
+                saw_step = True
+        assert shot.read_bytes() == base64.b64decode(displayed)
         send(command="frame", frame_index=9999)
         frame(4, .8)
         send(command="frame", frame_index=0)
         frame(0, 0)
-        print("PASS: real video decode, distinct pixels, VFR next/previous, seek, frame bounds")
+        print("PASS: decode, VFR stepping, playback pause, burst steps, visible-frame screenshot, bounds")
     finally:
         proc.stdin.close()
         try:

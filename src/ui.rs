@@ -9,6 +9,31 @@ use std::{
 };
 use uuid::Uuid;
 
+#[derive(Clone, Copy, Debug)]
+enum Direction {
+    Backward,
+    Forward,
+}
+
+impl Direction {
+    fn delta(self) -> i64 {
+        match self {
+            Self::Backward => -1,
+            Self::Forward => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ReviewAction {
+    TogglePlay,
+    Boundary(Direction),
+    JumpSecond(Direction),
+    StepFrame(Direction),
+    Screenshot,
+    ToggleDictation,
+}
+
 pub struct ReviewApp {
     backend: Option<Backend>,
     session: Option<Session>,
@@ -33,6 +58,10 @@ pub struct ReviewApp {
     poll_pending: bool,
     closing: bool,
     scrub: Option<f64>,
+    #[cfg(test)]
+    commands: Vec<serde_json::Value>,
+    #[cfg(test)]
+    events: std::collections::VecDeque<Event>,
 }
 impl ReviewApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -71,9 +100,15 @@ impl ReviewApp {
             poll_pending: false,
             closing: false,
             scrub: None,
+            #[cfg(test)]
+            commands: Vec::new(),
+            #[cfg(test)]
+            events: std::collections::VecDeque::new(),
         }
     }
     fn send(&mut self, command: serde_json::Value) {
+        #[cfg(test)]
+        self.commands.push(command.clone());
         if let Some(b) = &self.backend {
             if let Err(e) = b.send(command) {
                 self.error = Some(e);
@@ -204,7 +239,7 @@ impl ReviewApp {
                 }
             }
         }
-        while let Some(event) = self.backend.as_ref().and_then(|b| b.events.try_recv().ok()) {
+        while let Some(event) = self.next_event() {
             match event {
                 Event::Opened { duration, frames } => {
                     self.duration = duration;
@@ -341,25 +376,45 @@ impl ReviewApp {
             }
         }
     }
-    fn toggle_play(&mut self) {
-        if self.ready && self.active.is_none() {
-            self.send(json!({"command":if self.playing{"pause"}else{"play"}}));
-            self.playing = !self.playing;
+    fn next_event(&mut self) -> Option<Event> {
+        #[cfg(test)]
+        if let Some(event) = self.events.pop_front() {
+            return Some(event);
         }
+        self.backend.as_ref().and_then(|b| b.events.try_recv().ok())
     }
-    fn jump(&mut self, seconds: f64) {
-        if self.ready && self.active.is_none() {
-            self.send(json!({"command":"jump","seconds":seconds}));
-            self.playing = false;
-        }
-    }
-    fn toggle_note(&mut self) {
-        if self.active.is_some() {
-            self.stop_note();
-        } else {
-            self.send(json!({"command":"pause"}));
-            self.playing = false;
-            self.start_note();
+    fn dispatch(&mut self, action: ReviewAction) {
+        match action {
+            ReviewAction::Screenshot => self.screenshot(),
+            ReviewAction::ToggleDictation => {
+                if self.active.is_some() {
+                    self.stop_note();
+                } else {
+                    self.start_note();
+                }
+            }
+            _ if !self.ready || self.active.is_some() => {}
+            ReviewAction::TogglePlay => {
+                self.send(json!({"command":if self.playing{"pause"}else{"play"}}));
+                self.playing = !self.playing;
+            }
+            ReviewAction::Boundary(direction) if self.frames > 0 => {
+                let frame = match direction {
+                    Direction::Backward => 0,
+                    Direction::Forward => self.frames - 1,
+                };
+                self.send(json!({"command":"frame","frame_index":frame}));
+                self.playing = false;
+            }
+            ReviewAction::Boundary(_) => {}
+            ReviewAction::JumpSecond(direction) => {
+                self.send(json!({"command":"jump","seconds":direction.delta() as f64}));
+                self.playing = false;
+            }
+            ReviewAction::StepFrame(direction) => {
+                self.send(json!({"command":"step","delta":direction.delta()}));
+                self.playing = false;
+            }
         }
     }
     // Attach to the note being dictated, else to a note already on this frame, else start a screenshot-only note.
@@ -394,12 +449,6 @@ impl ReviewApp {
         self.show_notes = true;
         self.send(json!({"command":"screenshot","id":id,"frame_index":frame,"path":path}));
     }
-    fn step(&mut self, delta: i64) {
-        if self.ready && self.active.is_none() {
-            self.send(json!({"command":"step","delta":delta}));
-            self.playing = false;
-        }
-    }
 }
 impl eframe::App for ReviewApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
@@ -421,11 +470,13 @@ impl eframe::App for ReviewApp {
             if let Some(id) = ctx.memory(|m| m.focused()) {
                 ctx.memory_mut(|m| m.surrender_focus(id));
             }
-            let (space, left, right, r, s, jump) = ctx.input(|i| {
+            let (space, left, right, home, end, r, s, jump) = ctx.input(|i| {
                 (
                     i.key_pressed(Key::Space),
                     i.key_pressed(Key::ArrowLeft),
                     i.key_pressed(Key::ArrowRight),
+                    i.key_pressed(Key::Home),
+                    i.key_pressed(Key::End),
                     i.key_pressed(Key::R),
                     i.key_pressed(Key::S) && !i.modifiers.command,
                     i.modifiers.shift || i.modifiers.ctrl,
@@ -434,26 +485,31 @@ impl eframe::App for ReviewApp {
             // Hide the keys from egui's focus navigation and from the slider.
             ctx.input_mut(|i| {
                 i.events.retain(|e| {
-                    !matches!(e, egui::Event::Key { key, .. } if matches!(key, Key::Space | Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown | Key::R | Key::S))
+                    !matches!(e, egui::Event::Key { key, .. } if matches!(key, Key::Space | Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End | Key::R | Key::S))
                 })
             });
             if space {
-                self.toggle_play();
+                self.dispatch(ReviewAction::TogglePlay);
             }
-            for (pressed, dir) in [(left, -1), (right, 1)] {
+            for (pressed, dir) in [(left, Direction::Backward), (right, Direction::Forward)] {
                 if pressed {
                     if jump {
-                        self.jump(dir as f64);
+                        self.dispatch(ReviewAction::JumpSecond(dir));
                     } else {
-                        self.step(dir);
+                        self.dispatch(ReviewAction::StepFrame(dir));
                     }
                 }
             }
+            for (pressed, dir) in [(home, Direction::Backward), (end, Direction::Forward)] {
+                if pressed {
+                    self.dispatch(ReviewAction::Boundary(dir));
+                }
+            }
             if r {
-                self.toggle_note();
+                self.dispatch(ReviewAction::ToggleDictation);
             }
             if s {
-                self.screenshot();
+                self.dispatch(ReviewAction::Screenshot);
             }
         }
         self.text_focus = false;
@@ -470,7 +526,7 @@ impl eframe::App for ReviewApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                     ui.menu_button("⋯",|ui|{
                         if ui.button("Show review folder").clicked(){if let Some(s)=&self.session{let _=std::process::Command::new("open").arg(&s.directory).spawn();}}
-                        ui.separator();ui.weak("Space: play / pause\n← →: previous / next frame\n⇧← ⇧→ (or ⌃): back / forward 1 s\nR: start / stop dictation\nS: screenshot of this frame");
+                        ui.separator();ui.weak("Space: play / pause\nHome / End: first / last frame\n← →: previous / next frame\n⇧← ⇧→ (or ⌃): back / forward 1 s\nR: start / stop dictation\nS: screenshot of this frame");
                     });
                     ui.toggle_value(&mut self.show_notes,"☰").on_hover_text("Notes");
                 });
@@ -492,36 +548,42 @@ impl eframe::App for ReviewApp {
         egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(self.ready && self.active.is_none(), |ui| {
+                    if ui.button("⏮").on_hover_text("First frame · Home").clicked() {
+                        self.dispatch(ReviewAction::Boundary(Direction::Backward));
+                    }
                     if ui
                         .button("-1s")
                         .on_hover_text("Back 1 second · ⇧←")
                         .clicked()
                     {
-                        self.jump(-1.0);
+                        self.dispatch(ReviewAction::JumpSecond(Direction::Backward));
                     }
                     if ui
                         .button("-1f")
                         .on_hover_text("Previous frame · ←")
                         .clicked()
                     {
-                        self.step(-1);
+                        self.dispatch(ReviewAction::StepFrame(Direction::Backward));
                     }
                     if ui
                         .button(if self.playing { "⏸" } else { "▶" })
                         .on_hover_text("Play / pause · Space")
                         .clicked()
                     {
-                        self.toggle_play();
+                        self.dispatch(ReviewAction::TogglePlay);
                     }
                     if ui.button("+1f").on_hover_text("Next frame · →").clicked() {
-                        self.step(1);
+                        self.dispatch(ReviewAction::StepFrame(Direction::Forward));
                     }
                     if ui
                         .button("+1s")
                         .on_hover_text("Forward 1 second · ⇧→")
                         .clicked()
                     {
-                        self.jump(1.0);
+                        self.dispatch(ReviewAction::JumpSecond(Direction::Forward));
+                    }
+                    if ui.button("⏭").on_hover_text("Last frame · End").clicked() {
+                        self.dispatch(ReviewAction::Boundary(Direction::Forward));
                     }
                 });
                 ui.monospace(timecode(self.anchor.seconds()));
@@ -555,11 +617,7 @@ impl eframe::App for ReviewApp {
                             .on_hover_text("Start / stop dictation · R")
                             .clicked()
                         {
-                            if self.active.is_some() {
-                                self.stop_note();
-                            } else {
-                                self.start_note();
-                            }
+                            self.dispatch(ReviewAction::ToggleDictation);
                         }
                     },
                 );
@@ -569,7 +627,7 @@ impl eframe::App for ReviewApp {
                         .on_hover_text("Save this frame with a note · S")
                         .clicked()
                     {
-                        self.screenshot();
+                        self.dispatch(ReviewAction::Screenshot);
                     }
                 });
                 if self.active.is_some() {
@@ -697,5 +755,149 @@ impl eframe::App for ReviewApp {
             self.last_poll = Instant::now();
         }
         ctx.request_repaint_after(Duration::from_millis(33));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> ReviewApp {
+        ReviewApp {
+            backend: None,
+            session: None,
+            opening: None,
+            texture: None,
+            anchor: FrameTime {
+                value: 3,
+                timescale: 10,
+                frame_index: 2,
+            },
+            duration: 1.0,
+            frames: 5,
+            playing: false,
+            ready: true,
+            loading: false,
+            show_notes: false,
+            text_focus: false,
+            active: None,
+            starting: false,
+            stop_requested: false,
+            stopping: false,
+            error: None,
+            dirty: false,
+            last_save: Instant::now(),
+            last_poll: Instant::now(),
+            poll_pending: false,
+            closing: false,
+            scrub: None,
+            commands: Vec::new(),
+            events: Default::default(),
+        }
+    }
+
+    #[test]
+    fn transport_dispatches_exact_indices_and_each_detent() {
+        let mut app = app();
+        app.playing = true;
+        app.dispatch(ReviewAction::Boundary(Direction::Forward));
+        app.dispatch(ReviewAction::Boundary(Direction::Backward));
+        app.dispatch(ReviewAction::StepFrame(Direction::Forward));
+        app.dispatch(ReviewAction::StepFrame(Direction::Forward));
+        app.dispatch(ReviewAction::StepFrame(Direction::Backward));
+        app.dispatch(ReviewAction::JumpSecond(Direction::Backward));
+        app.dispatch(ReviewAction::JumpSecond(Direction::Forward));
+        assert_eq!(
+            app.commands,
+            vec![
+                json!({"command":"frame","frame_index":4}),
+                json!({"command":"frame","frame_index":0}),
+                json!({"command":"step","delta":1}),
+                json!({"command":"step","delta":1}),
+                json!({"command":"step","delta":-1}),
+                json!({"command":"jump","seconds":-1.0}),
+                json!({"command":"jump","seconds":1.0}),
+            ]
+        );
+        assert!(!app.playing);
+        app.dispatch(ReviewAction::TogglePlay);
+        app.dispatch(ReviewAction::TogglePlay);
+        assert_eq!(
+            &app.commands[7..],
+            &[json!({"command":"play"}), json!({"command":"pause"})]
+        );
+        app.ready = false;
+        app.dispatch(ReviewAction::StepFrame(Direction::Forward));
+        app.ready = true;
+        app.frames = 0;
+        app.dispatch(ReviewAction::Boundary(Direction::Forward));
+        app.active = Some(Uuid::new_v4());
+        app.dispatch(ReviewAction::TogglePlay);
+        app.dispatch(ReviewAction::StepFrame(Direction::Backward));
+        assert_eq!(app.commands.len(), 9);
+    }
+
+    #[test]
+    fn dictation_and_screenshot_share_visible_anchor_and_recording_lifecycle() {
+        let dir = tempfile::Builder::new()
+            .prefix("action-test-")
+            .tempdir_in(".")
+            .unwrap();
+        let video = dir.path().join("video.mov");
+        std::fs::write(&video, b"test video").unwrap();
+        let mut app = app();
+        app.session = Some(Session::open(&video, dir.path().join("review")).unwrap());
+        app.playing = true;
+        app.dispatch(ReviewAction::ToggleDictation);
+        let id = app.active.unwrap();
+        assert!(app.starting && !app.playing && app.show_notes);
+        assert_eq!(app.commands[0]["command"], "record");
+        assert_eq!(app.commands[0]["frame_index"], 2);
+        app.dispatch(ReviewAction::Screenshot);
+        assert_eq!(app.commands[1]["command"], "screenshot");
+        assert_eq!(app.commands[1]["frame_index"], 2);
+        assert_eq!(app.commands[1]["id"], id.to_string());
+        app.dispatch(ReviewAction::ToggleDictation);
+        assert!(app.stop_requested);
+        assert_eq!(app.commands.len(), 2);
+        app.events.push_back(Event::Recording {
+            id,
+            anchor: app.anchor,
+        });
+        app.drain(&egui::Context::default());
+        assert!(app.stopping && !app.starting);
+        assert_eq!(app.commands[2], json!({"command":"stop_record"}));
+        app.dispatch(ReviewAction::ToggleDictation);
+        app.dispatch(ReviewAction::Screenshot);
+        assert_eq!(app.commands.len(), 3);
+        app.events.push_back(Event::Recorded { id });
+        app.drain(&egui::Context::default());
+        assert!(app.active.is_none() && !app.stopping);
+        assert_eq!(
+            app.session.as_ref().unwrap().review.notes[0].state,
+            NoteState::Transcribing
+        );
+        app.dirty = true;
+        app.dispatch(ReviewAction::ToggleDictation);
+        assert!(app.active.is_none());
+    }
+
+    #[test]
+    fn screenshot_uses_displayed_frame_even_after_navigation_command() {
+        let dir = tempfile::Builder::new()
+            .prefix("action-test-")
+            .tempdir_in(".")
+            .unwrap();
+        let video = dir.path().join("video.mov");
+        std::fs::write(&video, b"test video").unwrap();
+        let mut app = app();
+        app.session = Some(Session::open(&video, dir.path().join("review")).unwrap());
+        app.dispatch(ReviewAction::StepFrame(Direction::Forward));
+        app.dispatch(ReviewAction::Screenshot);
+        assert_eq!(app.commands[1]["frame_index"], 2);
+        assert_eq!(
+            app.session.as_ref().unwrap().review.notes[0].anchor,
+            app.anchor
+        );
     }
 }

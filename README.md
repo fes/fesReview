@@ -38,12 +38,15 @@ With a qualified helper bundled as the executable, non-symlink sibling `Contents
 
 The private child command is `review-input --device ct`, `review-input --device micro`, or `review-input --device mx-creative`. The planned MX Creative seven-button mapping is: play/pause, previous frame, next frame, back one second, forward one second, screenshot, and toggle dictation. Display content and button icons remain outside this layer. Stdin is closed; stdout carries only newline-terminated JSON objects with a single `action` field: `toggle_play`, `seek_start`, `seek_end`, `back_one_second`, `forward_one_second`, `screenshot`, `toggle_dictation`, `previous_frame`, or `next_frame`. The app accepts no commands, extra fields, or non-protocol stdout. The bridge uses no listener, global input monitoring, or injection. Tests use a synthetic Rust helper only.
 
+Original, standalone SVG candidates for play/pause, first/last frame, one-second seeking, screenshot, and dictation are in [assets/mx-keypad-icons](assets/mx-keypad-icons), with meanings, previews, and acceptance criteria in [the icon asset notes](docs/mx-keypad-icons.md). They are UI source assets only: fesReview neither loads nor writes them to hardware.
+
 ## Validation
 
 ```sh
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
+python3 scripts/test-mx-keypad-icons.py
 ./scripts/build-macos.sh
 python3 scripts/smoke-macos.py
 ```

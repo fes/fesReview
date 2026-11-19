@@ -16,6 +16,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - run: python3 scripts/test-mx-keypad-icons.py
       - run: xcrun swiftc -swift-version 5 -typecheck native/main.swift
       - run: cargo fmt --check
       - run: cargo test --all-targets

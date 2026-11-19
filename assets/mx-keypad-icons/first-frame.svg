@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
+  <title id="title">First frame</title>
+  <desc id="desc">A frame boundary with two chevrons pointing to it.</desc>
+  <rect width="480" height="480" fill="#07151b"/>
+  <rect x="18" y="18" width="444" height="444" rx="40" fill="none" stroke="#17414b" stroke-width="4"/>
+  <rect x="102" y="128" width="44" height="224" rx="18" fill="#36d8f5"/>
+  <path d="m249 148-90 92 90 92M350 148l-90 92 90 92" fill="none" stroke="#f4fbfd" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="240" y="424" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="28" font-weight="650" letter-spacing="4" text-anchor="middle">FIRST FRAME</text>
+</svg>

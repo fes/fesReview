@@ -14,5 +14,7 @@ Automated checks cannot grant microphone consent or judge the actual video/audio
 - Make destination unwritable / simulate full disk. Existing JSON must remain readable; save error stays actionable and closing must not silently discard edited notes.
 - Launch a second instance on the same review; reject concurrent writing. Replace source video bytes; reject old review rather than attaching notes to changed footage.
 - Share the review folder: JSON paths resolve to WAV/PNG attachments and timestamps are understandable without the app.
+- With a qualified controller helper, verify **Off** is initially selected and there is no automatic start. Select CT, Creator Micro 2, or MX Creative Console one at a time; the helper must receive exactly the matching fixed device argument. Removing or replacing the bundled helper with a symlink must make the controller unavailable.
+- For MX Creative Console, verify the input-only seven-button mapping: play/pause, previous frame, next frame, back one second, forward one second, screenshot, and dictation. Confirm the app neither writes display content nor claims button icons.
 
 Follow-ups after acceptance: more efficient shared-memory/GPU preview transport, optional waveform/audio replay, packaging/signing/notarization, MCP adapter, Windows media/speech backend.

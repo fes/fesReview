@@ -34,13 +34,17 @@ const TICK: Duration = Duration::from_millis(8);
 pub enum Device {
     Ct,
     Micro,
+    MxCreative,
 }
 
 impl Device {
+    const ALL: [Self; 3] = [Self::Ct, Self::Micro, Self::MxCreative];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Ct => "Loupedeck CT",
             Self::Micro => "Creator Micro 2",
+            Self::MxCreative => "MX Creative Console",
         }
     }
 
@@ -48,6 +52,7 @@ impl Device {
         match self {
             Self::Ct => "ct",
             Self::Micro => "micro",
+            Self::MxCreative => "mx-creative",
         }
     }
 }
@@ -300,7 +305,7 @@ impl Bridge {
             return;
         }
         ui.menu_button("Foreground controller", |ui| {
-            for device in [Device::Ct, Device::Micro] {
+            for device in Device::ALL {
                 if ui
                     .selectable_label(self.selected == Some(device), device.label())
                     .clicked()
@@ -318,6 +323,11 @@ impl Bridge {
             }
             if let Some(error) = self.error {
                 ui.label(error);
+            } else if self.selected == Some(Device::MxCreative) {
+                ui.weak(
+                    "MX Creative input only: 7 buttons for play, ±1 frame, ±1 second, \
+                     screenshot and dictation. Display/icons are not controlled.",
+                );
             } else if self.selected.is_some() {
                 ui.weak("Input only while this review window is ready and focused.");
             }
@@ -514,6 +524,31 @@ pub(crate) mod tests {
         assert!(lines.push(b"}\n", now + FRESH + TICK, emit).is_err());
     }
 
+    #[test]
+    fn devices_expose_exact_helper_selection() {
+        assert_eq!(
+            Device::ALL.map(|device| (device.label(), device.arg())),
+            [
+                ("Loupedeck CT", "ct"),
+                ("Creator Micro 2", "micro"),
+                ("MX Creative Console", "mx-creative"),
+            ]
+        );
+
+        let mut bridge = Bridge {
+            helper: None,
+            selected: None,
+            run: None,
+            error: None,
+            shutdown: None,
+            focus_epoch: Arc::default(),
+        };
+        bridge.select(Some(Device::MxCreative));
+        assert_eq!(bridge.selected, Some(Device::MxCreative));
+        bridge.select(None);
+        assert_eq!(bridge.selected, None);
+    }
+
     // Keep a worker alive with a deliberately queued event, without sleeps to
     // order the simulated focus transition and the arrival of the event.
     pub(crate) fn queued(epoch: u64, received: Instant) -> Bridge {
@@ -637,6 +672,8 @@ pub(crate) mod tests {
         assert_eq!(next(&mut bridge, 2), Action::TogglePlay);
         bridge.select(Some(Device::Micro));
         assert_eq!(next(&mut bridge, 2), Action::NextFrame);
+        bridge.select(Some(Device::MxCreative));
+        assert_eq!(next(&mut bridge, 2), Action::BackOneSecond);
         drop(bridge);
         const REAP_GRACE: Duration = Duration::from_secs(1);
         let worker = rx.recv_timeout(REAP_GRACE).unwrap();

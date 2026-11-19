@@ -9,12 +9,12 @@ fn main() {
 
     let device = match args.as_slice() {
         [mode, flag, value]
-            if mode == "review-input" && flag == "--device" && (value == "ct" || value == "micro") => {
-            value.as_str()
-        }
+            if mode == "review-input"
+                && flag == "--device"
+                && matches!(value.as_str(), "ct" | "micro" | "mx-creative") => value.as_str(),
         _ => {
             eprintln!(
-                "controller fixture: expected `review-input --device ct|micro`"
+                "controller fixture: expected `review-input --device ct|micro|mx-creative`"
             );
             std::process::exit(2);
         }
@@ -26,10 +26,11 @@ fn main() {
         std::process::exit(2);
     }
 
-    let action = if device == "ct" {
-        "toggle_play"
-    } else {
-        "next_frame"
+    let action = match device {
+        "ct" => "toggle_play",
+        "micro" => "next_frame",
+        "mx-creative" => "back_one_second",
+        _ => unreachable!(),
     };
 
     let mut stdout = io::stdout();

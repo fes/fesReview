@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
   <title id="title">Play or pause</title>
-  <desc id="desc">A play wedge and pause bars on a dark square.</desc>
+  <desc id="desc">A bold play wedge and oversized pause bars on a dark square, designed to remain clear when downscaled.</desc>
   <rect width="480" height="480" fill="#07151b"/>
-  <rect x="18" y="18" width="444" height="444" rx="40" fill="none" stroke="#17414b" stroke-width="4"/>
-  <path d="M116 141 224 210a34 34 0 0 1 0 60l-108 69Z" fill="#f4fbfd"/>
-  <rect x="270" y="142" width="48" height="196" rx="18" fill="#36d8f5"/>
-  <rect x="344" y="142" width="48" height="196" rx="18" fill="#36d8f5"/>
-  <path d="M247 118v244" stroke="#17414b" stroke-width="4" stroke-linecap="round"/>
-  <text x="240" y="424" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="28" font-weight="650" letter-spacing="3" text-anchor="middle">PLAY / PAUSE</text>
+  <rect x="16" y="16" width="448" height="448" rx="52" fill="none" stroke="#17414b" stroke-width="5"/>
+  <path d="M82 100 238 240 82 380Z" fill="#f4fbfd"/>
+  <rect x="286" y="96" width="62" height="288" rx="24" fill="#36d8f5"/>
+  <rect x="374" y="96" width="62" height="288" rx="24" fill="#36d8f5"/>
+  <text x="240" y="445" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="42" font-weight="700" letter-spacing="2" text-anchor="middle">PLAY / PAUSE</text>
 </svg>

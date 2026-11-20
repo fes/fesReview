@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
   <title id="title">Last frame</title>
-  <desc id="desc">Two chevrons pointing toward a frame boundary.</desc>
+  <desc id="desc">A bold right-pointing triangle and heavy end boundary, designed for a small display.</desc>
   <rect width="480" height="480" fill="#07151b"/>
-  <rect x="18" y="18" width="444" height="444" rx="40" fill="none" stroke="#17414b" stroke-width="4"/>
-  <path d="m130 148 90 92-90 92M231 148l90 92-90 92" fill="none" stroke="#f4fbfd" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="334" y="128" width="44" height="224" rx="18" fill="#36d8f5"/>
-  <text x="240" y="424" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="28" font-weight="650" letter-spacing="4" text-anchor="middle">LAST FRAME</text>
+  <rect x="16" y="16" width="448" height="448" rx="52" fill="none" stroke="#17414b" stroke-width="5"/>
+  <path d="M84 116 240 240 84 364Z" fill="#f4fbfd"/>
+  <rect x="332" y="98" width="68" height="284" rx="24" fill="#36d8f5"/>
+  <text x="240" y="445" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="42" font-weight="700" letter-spacing="2" text-anchor="middle">LAST FRAME</text>
 </svg>

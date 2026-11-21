@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
+  <title id="title">Screenshot</title>
+  <desc id="desc">A capture target held between open frame corners.</desc>
+  <rect width="480" height="480" fill="#07151b"/>
+  <rect x="18" y="18" width="444" height="444" rx="40" fill="none" stroke="#17414b" stroke-width="4"/>
+  <path d="M174 130h-64v64M306 130h64v64M110 286v64h64M370 286v64h-64" fill="none" stroke="#36d8f5" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="240" cy="240" r="73" fill="none" stroke="#f4fbfd" stroke-width="28"/>
+  <circle cx="240" cy="240" r="25" fill="#36d8f5"/>
+  <text x="240" y="424" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="28" font-weight="650" letter-spacing="3" text-anchor="middle">SCREENSHOT</text>
+</svg>

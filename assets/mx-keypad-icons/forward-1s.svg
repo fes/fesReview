@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
+  <title id="title">Forward one second</title>
+  <desc id="desc">A right-turning time arrow containing a one.</desc>
+  <rect width="480" height="480" fill="#07151b"/>
+  <rect x="18" y="18" width="444" height="444" rx="40" fill="none" stroke="#17414b" stroke-width="4"/>
+  <path d="M125 287a130 130 0 1 0 23-136" fill="none" stroke="#f4fbfd" stroke-width="34" stroke-linecap="round"/>
+  <path d="m376 134-3 105-101-27" fill="none" stroke="#36d8f5" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m239 214-28 19v22l28-13v103h34V214Z" fill="#36d8f5"/>
+  <text x="240" y="424" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="28" font-weight="650" letter-spacing="4" text-anchor="middle">FORWARD 1 SEC</text>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" role="img" aria-labelledby="title desc">
+  <title id="title">First frame</title>
+  <desc id="desc">A heavy start boundary and one bold chevron pointing left, designed for a small display.</desc>
+  <rect width="480" height="480" fill="#07151b"/>
+  <rect x="16" y="16" width="448" height="448" rx="52" fill="none" stroke="#17414b" stroke-width="5"/>
+  <rect x="80" y="98" width="68" height="284" rx="24" fill="#36d8f5"/>
+  <path d="M396 116 240 240l156 124Z" fill="#f4fbfd"/>
+  <text x="240" y="445" fill="#f4fbfd" font-family="system-ui, sans-serif" font-size="42" font-weight="700" letter-spacing="2" text-anchor="middle">FIRST FRAME</text>
+</svg>
